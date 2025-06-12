@@ -166,7 +166,24 @@ app.get('/setup-database', async (req, res) => {
                 quantidade INT,
                 pedido VARCHAR(50)
             )
-        `);        // Inserir dados de exemplo na tabela clientes
+        `);
+
+        // Criar tabela de itens do pedido
+        await connection.execute(`
+            CREATE TABLE IF NOT EXISTS itensped (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                Pedido_Id VARCHAR(50),
+                Numero INT,
+                Produto VARCHAR(50),
+                Descricao_Produto VARCHAR(255),
+                Qtd INT,
+                Unitario DECIMAL(10, 2),
+                Valor_Total DECIMAL(10, 2),
+                FOREIGN KEY (Pedido_Id) REFERENCES pedidos(Pedido_Id)
+            )
+        `);
+
+        // Inserir dados de exemplo na tabela clientes
         console.log('Inserindo dados de exemplo em clientes...');
         await connection.execute(`
             INSERT INTO clientes (
@@ -235,6 +252,25 @@ app.get('/setup-database', async (req, res) => {
                 800.00,
                 880.00,
                 'concluido')
+            `);
+
+            // Inserir itens de exemplo
+            await connection.execute(`
+                INSERT INTO itensped (
+                    Pedido_Id,
+                    Numero,
+                    Produto,
+                    Descricao,
+                    Qtd,
+                    Unitario,
+                    Valor_Total
+                ) VALUES 
+                ('PED001', 1, 'PROD001', 'Tênis Casual', 2, 300.00, 600.00),
+                ('PED001', 2, 'PROD002', 'Sapato Social', 1, 450.00, 450.00),
+                ('PED001', 3, 'PROD003', 'Sandália', 2, 300.00, 600.00),
+                ('PED002', 1, 'PROD004', 'Bota', 1, 800.00, 800.00),
+                ('PED002', 2, 'PROD005', 'Tênis Esportivo', 2, 700.00, 1400.00),
+                ('PED003', 1, 'PROD006', 'Chinelo', 2, 400.00, 800.00)
             `);
         }
 
@@ -464,59 +500,410 @@ app.get('/produtos-cliente', async (req, res) => {
     }
 });
 
-// Rota para buscar itens de um pedido (usando itensped)
+// Rota para diagnóstico detalhado de itens do pedido
+app.get('/diagnostico-itens-pedido', async (req, res) => {
+    const { pedidoId } = req.query;
+    if (!pedidoId) {
+        return res.status(400).json({
+            error: 'Pedido não informado',
+            message: 'É necessário informar o ID do pedido'
+        });
+    }
+
+    let connection;
+    try {
+        // 1. Conectar ao banco
+        connection = await mysql.createConnection(dbConfig);
+        console.log('Iniciando diagnóstico para pedido:', pedidoId);
+
+        // 2. Buscar pedido
+        const [pedidos] = await connection.execute(
+            'SELECT * FROM pedidos WHERE Pedido_Id = ? OR Numero = ?',
+            [pedidoId, pedidoId]
+        );
+
+        if (pedidos.length === 0) {
+            await connection.end();
+            return res.json({
+                pedido: {
+                    encontrado: false,
+                    id_original: pedidoId,
+                    id_formatado: pedidoId,
+                    numero: null
+                },
+                itens: {
+                    total: 0,
+                    dados: []
+                },
+                pedidos_similares: [],
+                status: {
+                    pedido_encontrado: false,
+                    tem_itens: false
+                },
+                sugestoes: ["Pedido não encontrado. Verifique se o número está correto."]
+            });
+        }
+
+        const pedido = pedidos[0];
+
+        // 3. Buscar itens do pedido
+        console.log('Buscando itens com Pedido_Id:', pedido[0].Pedido_Id);
+        const [itens] = await connection.execute(`
+            SELECT 
+                i.Numero as item_numero,
+                i.Produto as produto_codigo,
+                i.Descricao_Produto as descricao,
+                i.Qtd as quantidade,
+                i.Unitario as valor_unitario,
+                i.Valor_Total as valor_total
+            FROM itensped i
+            WHERE i.Pedido_Id = ?
+            ORDER BY i.Numero
+        `, [pedido[0].Pedido_Id]);
+        console.log('Itens encontrados:', itens.length);
+
+        // Log específico para pedido 51616
+        if (pedidoId === '51616') {
+            console.log('\nDetalhes do Pedido 51616:');
+            console.log('Status:', pedido[0].Status);
+            console.log('Data Emissão:', pedido[0].Data_Emissao);
+            console.log('Valor Total:', pedido[0].Valor_Total);
+            console.log('\nItens do Pedido:');
+            itens.forEach(item => {
+                console.log(`\nItem ${item.Numero}:`);
+                console.log('Código:', item.Produto);
+                console.log('Descrição:', item.Descricao_Produto || item.Descricao);
+                console.log('Referência:', item.Referencia);
+                console.log('Cor:', item.Cor);
+                console.log('Tamanho:', item.Tamanho);
+                console.log('Quantidade:', item.Qtd);
+                console.log('Unidade:', item.Unidade);
+                console.log('Valor Unitário:', item.Unitario);
+                console.log('Valor Total:', item.Valor_Total);
+                console.log('Grupo:', item.Grupo);
+                console.log('Subgrupo:', item.Subgrupo);
+                console.log('Saldo:', item.Saldo);
+            });
+        }
+
+        // 4. Buscar pedidos similares
+        const [pedidosSimilares] = await connection.execute(
+            `SELECT 
+                p.Pedido_Id,
+                p.Numero,
+                p.Status,
+                p.Data_Emissao,
+                p.Valor_Total,
+                p.Qtd_Itens,
+                COUNT(i.Itensped_Id) as total_itens
+            FROM pedidos p
+            LEFT JOIN itensped i ON p.Pedido_Id = i.Pedido_Id
+            WHERE p.Pedido_Id LIKE ? OR p.Numero LIKE ?
+            GROUP BY p.Pedido_Id, p.Numero, p.Status, p.Data_Emissao, p.Valor_Total, p.Qtd_Itens
+            HAVING total_itens > 0
+            LIMIT 5`,
+            [`%${pedidoId}%`, `%${pedidoId}%`]
+        );
+
+        // 5. Fechar conexão
+        await connection.end();
+        connection = null;
+
+        // 6. Preparar dados formatados
+        const formatarData = (data) => {
+            if (!data) return null;
+            try {
+                return new Date(data).toLocaleDateString('pt-BR');
+            } catch {
+                return null;
+            }
+        };
+
+        const formatarValor = (valor) => {
+            if (valor === null || valor === undefined) return 0;
+            return Number(valor).toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        };
+
+        // 7. Preparar resposta
+        const diagnostico = {
+            pedido: {
+                encontrado: true,
+                dados: {
+                    ...pedido,
+                    Data_Emissao: formatarData(pedido.Data_Emissao),
+                    Data_Cancel: formatarData(pedido.Data_Cancel),
+                    Valor_Total: formatarValor(pedido.Valor_Total),
+                    Valor_Liquido: formatarValor(pedido.Valor_Liquido),
+                    Valor_Produtos: formatarValor(pedido.Valor_Produtos)
+                },
+                id_original: pedidoId,
+                id_formatado: pedido.Pedido_Id,
+                numero: pedido.Numero
+            },
+            itens: {
+                total: itens.length,
+                dados: itens.map(item => ({
+                    id: item.Itensped_Id,
+                    item_numero: item.Numero,
+                    produto_codigo: item.Produto,
+                    produto_descricao: item.Descricao_Produto || item.Descricao,
+                    quantidade: item.Qtd,
+                    valor_unitario: formatarValor(item.Unitario),
+                    valor_total: formatarValor(item.Valor_Total),
+                    valor_liquido: formatarValor(item.Valor_Liquido),
+                    data_emissao: formatarData(item.Data_Emissao),
+                    filial: item.Filial_Id,
+                    referencia: item.Referencia,
+                    cor: item.Cor,
+                    tamanho: item.Tamanho,
+                    unidade: item.Unidade,
+                    grupo: item.Grupo,
+                    subgrupo: item.Subgrupo,
+                    saldo: formatarValor(item.Saldo)
+                }))
+            },
+            pedidos_similares: pedidosSimilares.map(p => ({
+                ...p,
+                Data_Emissao: formatarData(p.Data_Emissao),
+                Valor_Total: formatarValor(p.Valor_Total)
+            })),
+            status: {
+                pedido_encontrado: true,
+                tem_itens: itens.length > 0,
+                foi_faturado: pedido.Nfemitida === 'S',
+                nota_cancelada: pedido.Nfcancelada === 'S',
+                pedido_cancelado: pedido.Status === 'E' || pedido.Status === 'C' || pedido.Data_Cancel,
+                status_atual: pedido.Status,
+                data_cancelamento: formatarData(pedido.Data_Cancel),
+                data_emissao: formatarData(pedido.Data_Emissao)
+            },
+            sugestoes: []
+        };
+
+        // 8. Adicionar sugestões
+        if (itens.length === 0) {
+            diagnostico.sugestoes.push("Nenhum item encontrado para este pedido.");
+        }
+        if (pedido.Nfemitida === 'S') {
+            diagnostico.sugestoes.push("O pedido já foi faturado. Verifique se os itens estão na nota fiscal.");
+        }
+        if (pedido.Nfcancelada === 'S') {
+            diagnostico.sugestoes.push("A nota fiscal deste pedido foi cancelada.");
+        }
+        if (diagnostico.status.pedido_cancelado) {
+            if (pedido.Data_Cancel) {
+                diagnostico.sugestoes.push(`O pedido foi cancelado em ${formatarData(pedido.Data_Cancel)}.`);
+            } else {
+                diagnostico.sugestoes.push("O pedido está cancelado.");
+            }
+            if (pedido.Obs_Cancel && pedido.Obs_Cancel.trim()) {
+                diagnostico.sugestoes.push(`Motivo do cancelamento: ${pedido.Obs_Cancel.trim()}`);
+            }
+        }
+        if (pedidosSimilares.length > 0) {
+            diagnostico.sugestoes.push("Existem pedidos similares que podem ser o correto.");
+        }
+
+        // 9. Enviar resposta
+        res.json(diagnostico);
+
+    } catch (error) {
+        console.error('Erro no diagnóstico:', {
+            message: error.message,
+            code: error.code,
+            sqlMessage: error.sqlMessage,
+            sqlState: error.sqlState
+        });
+
+        if (connection) {
+            try {
+                await connection.end();
+            } catch (endError) {
+                console.error('Erro ao fechar conexão:', endError);
+            }
+        }
+
+        res.status(500).json({
+            error: 'Erro no diagnóstico dos itens',
+            message: error.message,
+            diagnostico: {
+                pedido: {
+                    encontrado: false,
+                    dados: null,
+                    id_original: pedidoId,
+                    id_formatado: pedidoId,
+                    numero: null
+                },
+                itens: {
+                    total: 0,
+                    dados: []
+                },
+                pedidos_similares: [],
+                status: {
+                    pedido_encontrado: false,
+                    tem_itens: false,
+                    foi_faturado: false,
+                    nota_cancelada: false,
+                    pedido_cancelado: false
+                },
+                sugestoes: ["Ocorreu um erro ao buscar o diagnóstico do pedido. Por favor, tente novamente."]
+            }
+        });
+    }
+});
+
+// Atualizar a rota de itens-pedido
 app.get('/itens-pedido', async (req, res) => {
+    const pedidoId = req.query.pedidoId;
+    console.log('Buscando itens para pedido:', pedidoId);
+
+    let connection;
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        console.log('Conexão com o banco estabelecida');
+
+        // Primeiro, vamos verificar se o pedido existe
+        const [pedido] = await connection.execute(
+            'SELECT Pedido_Id FROM pedidos WHERE Pedido_Id = ?',
+            [pedidoId]
+        );
+        console.log('Pedido encontrado:', pedido);
+
+        if (!pedido || pedido.length === 0) {
+            console.log('Pedido não encontrado');
+            return res.status(404).json({
+                error: 'Pedido não encontrado',
+                message: `Não foi encontrado nenhum pedido com o ID ${pedidoId}`
+            });
+        }
+
+        // Agora vamos buscar os itens
+        const [itens] = await connection.execute(`
+            SELECT 
+                i.Numero as item_numero,
+                i.Produto as produto_codigo,
+                i.Descricao_Produto as descricao,
+                i.Qtd as quantidade,
+                i.Unitario as valor_unitario,
+                i.Valor_Total as valor_total
+            FROM itensped i
+            WHERE i.Pedido_Id = ?
+            ORDER BY i.Numero
+        `, [pedidoId]);
+
+        console.log(`Encontrados ${itens.length} itens para o pedido ${pedidoId}`);
+        console.log('Primeiro item (se houver):', itens[0]);
+
+        // Formatar os valores
+        const itensFormatados = itens.map(item => ({
+            item_numero: item.item_numero,
+            produto_codigo: item.produto_codigo,
+            descricao: item.descricao || 'Produto sem descrição',
+            quantidade: Number(item.quantidade) || 0,
+            valor_unitario: Number(item.valor_unitario) || 0,
+            valor_total: Number(item.valor_total) || 0,
+            unidade: item.unidade || 'UN'
+        }));
+
+        res.json({ itens: itensFormatados });
+    } catch (error) {
+        console.error('Erro ao buscar itens do pedido:', {
+            message: error.message,
+            code: error.code,
+            sqlMessage: error.sqlMessage,
+            sqlState: error.sqlState,
+            stack: error.stack
+        });
+        
+        res.status(500).json({ 
+            error: 'Erro ao buscar itens do pedido',
+            message: error.message,
+            details: error.sqlMessage
+        });
+    } finally {
+        if (connection) {
+            try {
+                await connection.end();
+            } catch (err) {
+                console.error('Erro ao fechar conexão:', err);
+            }
+        }
+    }
+});
+
+// Rota para buscar cheques do cliente
+app.get('/cheques-cliente', async (req, res) => {
+    const { cliente } = req.query;
+    if (!cliente) return res.status(400).json({ error: 'Cliente não informado' });
+
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        // Corrigido: filtra apenas por Cliente, pois não existe coluna Cnpj na tabela cheques
+        const [cheques] = await connection.execute(
+            'SELECT * FROM cheques WHERE Cliente = ?',
+            [cliente]
+        );
+        await connection.end();
+        res.json(cheques);
+    } catch (error) {
+        console.error('Erro ao buscar cheques do cliente:', error);
+        res.status(500).json({ error: 'Erro ao buscar cheques do cliente' });
+    }
+});
+
+// Rota para diagnóstico de pedido específico
+app.get('/diagnostico-pedido', async (req, res) => {
     const { pedidoId } = req.query;
     if (!pedidoId) return res.status(400).json({ error: 'Pedido não informado' });
 
     try {
         const connection = await mysql.createConnection(dbConfig);
-        // Busca itens do pedido na tabela itensped
-        const [itens] = await connection.execute(
-            `SELECT 
-                Recnum,
-                Produto,
-                Descricao_Produto,
-                Unidade_Produto,
-                Qtd,
-                Unitario,
-                Valor_Total,
-                Valor_Liquido
-            FROM itensped
-            WHERE Pedido_Id = ?`,
+        
+        // Verificar pedido
+        const [pedido] = await connection.execute(
+            'SELECT * FROM pedidos WHERE Pedido_Id = ?',
             [pedidoId]
         );
+
+        // Verificar produtos vendidos
+        const [produtos] = await connection.execute(
+            'SELECT * FROM produtos_vendidos WHERE pedido = ?',
+            [pedidoId]
+        );
+
+        // Verificar se há diferença no formato do ID
+        const [produtosAlternativos] = await connection.execute(
+            'SELECT * FROM produtos_vendidos WHERE pedido LIKE ?',
+            [`%${pedidoId}%`]
+        );
+
         await connection.end();
-        res.json(itens);
+
+        res.json({
+            pedido: pedido[0] || null,
+            produtos_encontrados: produtos,
+            produtos_alternativos: produtosAlternativos,
+            diagnostico: {
+                pedido_existe: pedido.length > 0,
+                produtos_encontrados: produtos.length,
+                produtos_alternativos_encontrados: produtosAlternativos.length,
+                formato_pedido_id: pedido[0]?.Pedido_Id,
+                formato_produtos_pedido: produtos.map(p => p.pedido)
+            }
+        });
     } catch (error) {
-        console.error('Erro ao buscar itens do pedido:', error);
-        res.status(500).json({ error: 'Erro ao buscar itens do pedido' });
+        console.error('Erro no diagnóstico do pedido:', error);
+        res.status(500).json({ 
+            error: 'Erro no diagnóstico do pedido',
+            details: error.message 
+        });
     }
 });
 
-// Middleware para tratamento de erros
-app.use((err, req, res, next) => {
-    console.error('Erro na aplicação:', err);
-    res.status(500).json({
-        error: 'Erro interno do servidor',
-        message: err.message,
-        ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
-    });
-});
-
-// Middleware para rotas não encontradas
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'Rota não encontrada',
-        path: req.path
-    });
-});
-
-// Iniciar o servidor
-app.listen(PORT, async () => {
-    console.log(`Servidor backend rodando na porta ${PORT}`);
-    console.log(`Acesse: http://localhost:${PORT}`);
-    
-    // Testar conexão com o banco ao iniciar
-    await testDatabaseConnection();
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+    testDatabaseConnection();
 });
