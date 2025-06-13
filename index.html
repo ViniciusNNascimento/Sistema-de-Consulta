@@ -1,0 +1,26 @@
+<script>
+    document.getElementById('consultaForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const codigo = document.getElementById('codigo').value;
+        const nome = document.getElementById('nome').value;
+        const cor = document.getElementById('cor').value;
+        const tamanho = document.getElementById('tamanho').value;
+        
+        // Aqui você pode adicionar a lógica para processar os dados
+        console.log('Código:', codigo);
+        console.log('Nome:', nome);
+        console.log('Cor:', cor);
+        console.log('Tamanho:', tamanho);
+        
+        // Exemplo de como mostrar os resultados
+        const resultadoDiv = document.getElementById('resultado');
+        resultadoDiv.innerHTML = `
+            <h3>Resultados da Consulta:</h3>
+            <p>Código: ${codigo}</p>
+            <p>Nome: ${nome}</p>
+            <p>Cor: ${cor}</p>
+            <p>Tamanho: ${tamanho}</p>
+        `;
+    });
+</script> 

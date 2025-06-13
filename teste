@@ -293,7 +293,7 @@ app.get('/sugestao-clientes', async (req, res) => {
     try {
         const connection = await mysql.createConnection(dbConfig);
         const [clientes] = await connection.execute(
-            `SELECT DISTINCT Codigo, Nome, Nome_Fantasia, Cnpj 
+            `SELECT DISTINCT Nome, Nome_Fantasia, Cnpj 
              FROM clientes 
              WHERE Nome LIKE ? OR Nome_Fantasia LIKE ? OR Cnpj LIKE ? 
              LIMIT 10`,
@@ -334,51 +334,16 @@ app.get('/consulta-cliente', async (req, res) => {
             );
             [pedidos] = await connection.execute(
                 `SELECT 
-                    p.Recnum,
-                    p.Numero,
-                    p.Data_Emissao,
-                    p.Data_Entrega,
-                    p.Cliente,
-                    p.Condicao_Pagto,
-                    p.Vendedor,
-                    p.Valor_Total,
-                    p.Valor_Liquido,
-                    p.Valor_Desconto,
-                    p.Qtd_Itens,
-                    p.Status,
-                    p.Nfemitida,
-                    p.Nfcancelada,
-                    p.Nota_Fiscal,
-                    p.Serie_Nota,
-                    p.Total_Nota,
-                    p.Data_Nota,
-                    p.Valor_Frete,
-                    p.Valor_Seguro,
-                    p.Desp_Acessorias,
-                    p.Transportadora,
-                    p.Nome_Cliente,
-                    p.Endereco,
-                    p.Bairro,
-                    p.Cidade,
-                    p.Estado,
-                    p.Cep,
-                    p.Cnpj,
-                    p.Inscricao,
-                    p.Data_Cancel,
-                    p.Obs_Cancel,
-                    p.Valor_Produtos,
-                    p.Valor_Servicos,
-                    p.Pedido_Id,
-                    p.Filial_Id,
-                    p.Data_Fechamento,
-                    p.Situacao,
-                    p.Data_Situacao,
-                    p.Usuario_Situacao,
-                    p.Valor_Total_Pedido,
-                    p.Valor_Liquido_Pedido
-                 FROM pedidos p
-                 WHERE REPLACE(REPLACE(REPLACE(REPLACE(p.Cnpj, '.', ''), '-', ''), '/', ''), ' ', '') = ? 
-                 ORDER BY p.Data_Emissao DESC`,
+                    Data_Emissao,
+                    Valor_Total,
+                    Nome_Cliente,
+                    Qtd_Itens,
+                    Cidade,
+                    Pedido_Id,
+                    Filial_Id
+                 FROM pedidos
+                 WHERE REPLACE(REPLACE(REPLACE(REPLACE(Cnpj, '.', ''), '-', ''), '/', ''), ' ', '') = ? 
+                 ORDER BY Data_Emissao DESC`,
                 [cnpjLimpo]
             );
         } else {
@@ -394,51 +359,16 @@ app.get('/consulta-cliente', async (req, res) => {
             );
             [pedidos] = await connection.execute(
                 `SELECT 
-                    p.Recnum,
-                    p.Numero,
-                    p.Data_Emissao,
-                    p.Data_Entrega,
-                    p.Cliente,
-                    p.Condicao_Pagto,
-                    p.Vendedor,
-                    p.Valor_Total,
-                    p.Valor_Liquido,
-                    p.Valor_Desconto,
-                    p.Qtd_Itens,
-                    p.Status,
-                    p.Nfemitida,
-                    p.Nfcancelada,
-                    p.Nota_Fiscal,
-                    p.Serie_Nota,
-                    p.Total_Nota,
-                    p.Data_Nota,
-                    p.Valor_Frete,
-                    p.Valor_Seguro,
-                    p.Desp_Acessorias,
-                    p.Transportadora,
-                    p.Nome_Cliente,
-                    p.Endereco,
-                    p.Bairro,
-                    p.Cidade,
-                    p.Estado,
-                    p.Cep,
-                    p.Cnpj,
-                    p.Inscricao,
-                    p.Data_Cancel,
-                    p.Obs_Cancel,
-                    p.Valor_Produtos,
-                    p.Valor_Servicos,
-                    p.Pedido_Id,
-                    p.Filial_Id,
-                    p.Data_Fechamento,
-                    p.Situacao,
-                    p.Data_Situacao,
-                    p.Usuario_Situacao,
-                    p.Valor_Total_Pedido,
-                    p.Valor_Liquido_Pedido
-                 FROM pedidos p
-                 WHERE p.Nome_Cliente LIKE ? OR p.Cnpj LIKE ?
-                 ORDER BY p.Data_Emissao DESC`,
+                    Data_Emissao,
+                    Valor_Total,
+                    Nome_Cliente,
+                    Qtd_Itens,
+                    Cidade,
+                    Pedido_Id,
+                    Filial_Id
+                 FROM pedidos
+                 WHERE Nome_Cliente LIKE ? OR Cnpj LIKE ?
+                 ORDER BY Data_Emissao DESC`,
                 [`%${cliente}%`, `%${cliente}%`]
             );
         }
@@ -518,15 +448,15 @@ app.get('/historico-pedidos', async (req, res) => {
         const connection = await mysql.createConnection(dbConfig);
         const [rows] = await connection.execute(
             `SELECT 
-                p.Pedido_Id,
-                p.Numero,
+                p.Numero_Pedido,
                 p.Data_Emissao,
                 p.Condicao_Pagto,
                 p.Valor_Total,
                 p.Valor_Liquido,
-                p.Status,
-                p.Data_Nota,
-                p.Data_Cancel
+                p.Status_Pedido,
+                p.Data_Faturamento,
+                p.Data_Cancelamento,
+                p.Observacoes
             FROM pedidos p
             WHERE p.Nome_Cliente LIKE ? OR p.Cnpj LIKE ?
             ORDER BY p.Data_Emissao DESC`,
@@ -620,13 +550,12 @@ app.get('/diagnostico-itens-pedido', async (req, res) => {
         console.log('Buscando itens com Pedido_Id:', pedido[0].Pedido_Id);
         const [itens] = await connection.execute(`
             SELECT 
-                i.Numero,
-                i.Produto,
-                i.Descricao_Produto,
-                i.Qtd,
-                i.Unitario,
-                i.Valor_Total,
-                i.Unidade_Produto
+                i.Numero as item_numero,
+                i.Produto as produto_codigo,
+                i.Descricao_Produto as descricao,
+                i.Qtd as quantidade,
+                i.Unitario as valor_unitario,
+                i.Valor_Total as valor_total
             FROM itensped i
             WHERE i.Pedido_Id = ?
             ORDER BY i.Numero
@@ -648,7 +577,7 @@ app.get('/diagnostico-itens-pedido', async (req, res) => {
                 console.log('Cor:', item.Cor);
                 console.log('Tamanho:', item.Tamanho);
                 console.log('Quantidade:', item.Qtd);
-                console.log('Unidade:', item.Unidade_Produto);
+                console.log('Unidade:', item.Unidade);
                 console.log('Valor Unitário:', item.Unitario);
                 console.log('Valor Total:', item.Valor_Total);
                 console.log('Grupo:', item.Grupo);
@@ -730,7 +659,7 @@ app.get('/diagnostico-itens-pedido', async (req, res) => {
                     referencia: item.Referencia,
                     cor: item.Cor,
                     tamanho: item.Tamanho,
-                    unidade: item.Unidade_Produto,
+                    unidade: item.Unidade,
                     grupo: item.Grupo,
                     subgrupo: item.Subgrupo,
                     saldo: formatarValor(item.Saldo)
@@ -854,13 +783,12 @@ app.get('/itens-pedido', async (req, res) => {
         // Agora vamos buscar os itens
         const [itens] = await connection.execute(`
             SELECT 
-                i.Numero,
-                i.Produto,
-                i.Descricao_Produto,
-                i.Qtd,
-                i.Unitario,
-                i.Valor_Total,
-                i.Unidade_Produto
+                i.Numero as item_numero,
+                i.Produto as produto_codigo,
+                i.Descricao_Produto as descricao,
+                i.Qtd as quantidade,
+                i.Unitario as valor_unitario,
+                i.Valor_Total as valor_total
             FROM itensped i
             WHERE i.Pedido_Id = ?
             ORDER BY i.Numero
@@ -871,16 +799,16 @@ app.get('/itens-pedido', async (req, res) => {
 
         // Formatar os valores
         const itensFormatados = itens.map(item => ({
-            numero: item.Numero,
-            produto: item.Produto,
-            descricao: item.Descricao_Produto || 'Produto sem descrição',
-            quantidade: Number(item.Qtd) || 0,
-            valor_unitario: Number(item.Unitario) || 0,
-            valor_total: Number(item.Valor_Total) || 0,
-            unidade: item.Unidade_Produto || 'UN'
+            item_numero: item.item_numero,
+            produto_codigo: item.produto_codigo,
+            descricao: item.descricao || 'Produto sem descrição',
+            quantidade: Number(item.quantidade) || 0,
+            valor_unitario: Number(item.valor_unitario) || 0,
+            valor_total: Number(item.valor_total) || 0,
+            unidade: item.unidade || 'UN'
         }));
 
-        res.json(itensFormatados);
+        res.json({ itens: itensFormatados });
     } catch (error) {
         console.error('Erro ao buscar itens do pedido:', {
             message: error.message,
@@ -1048,61 +976,6 @@ app.get('/duplicatas-cliente', async (req, res) => {
         if (connection) {
             connection.end();
             console.log('Conexão com banco encerrada');
-        }
-    }
-});
-
-app.get('/titulos', async (req, res) => {
-    const { cliente } = req.query;
-    
-    if (!cliente) {
-        return res.status(400).json({ error: 'Nome do cliente é obrigatório' });
-    }
-
-    let connection;
-    try {
-        connection = await mysql.createConnection(dbConfig);
-        console.log('Buscando títulos para cliente:', cliente);
-        
-        // Primeiro, buscar o código do cliente na tabela clientes
-        const [clientes] = await connection.execute(
-            'SELECT Codigo FROM clientes WHERE Cnpj = ?',
-            [cliente]
-        );
-
-        if (clientes.length === 0) {
-            console.log('Cliente não encontrado');
-            return res.json([]);
-        }
-
-        const codigoCliente = clientes[0].Codigo;
-        console.log('Código do cliente:', codigoCliente);
-        
-        const query = `
-            SELECT 
-                Numero,
-                Emissao,
-                Vencimento,
-                Pagamento,
-                Valor,
-                Valor_Pago,
-                Conta_Bancaria,
-                Observacoes,
-                Pago
-            FROM duplic
-            WHERE Cliente = ?
-            ORDER BY Vencimento DESC
-        `;
-
-        const [titulos] = await connection.execute(query, [codigoCliente]);
-        console.log('Títulos encontrados:', titulos.length);
-        res.json(titulos);
-    } catch (error) {
-        console.error('Erro ao buscar títulos:', error);
-        res.status(500).json({ error: 'Erro ao buscar títulos do cliente' });
-    } finally {
-        if (connection) {
-            await connection.end();
         }
     }
 });
